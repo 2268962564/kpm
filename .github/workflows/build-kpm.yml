@@ -6,6 +6,7 @@ on:
       - ".github/workflows/build-kpm.yml"
       - "kernel/**"
       - "src/**"
+      - "**.c"
   workflow_dispatch:
     inputs:
       release:
