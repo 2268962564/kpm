@@ -9,6 +9,8 @@
 #include <linux/kernel.h>
 #include <linux/printk.h>
 #include <linux/string.h>
+#include <linux/uaccess.h>  // for copy_to_user, copy_from_user
+#include <linux/slab.h>
 
 #include <kpm_utils.h>
 #include <kpm_hook_utils.h>
@@ -31,7 +33,8 @@ static struct file *hook_replace(do_filp_open)(int dfd, struct filename *pathnam
     if (unlikely(!strcmp(hostsOrigPath, pathname->name))) {
         bool replace = false;
         const char *originName = NULL;
-        // netd is the root user
+
+        // Only root can modify the hosts file
         if (current_uid() == 0) {
             replace = true;
             originName = pathname->name;
@@ -42,9 +45,28 @@ static struct file *hook_replace(do_filp_open)(int dfd, struct filename *pathnam
         struct file *f = hook_call_backup(do_filp_open, dfd, pathname, o);
 
         if (replace) {
+            // Modify the hosts file
+            if (!IS_ERR(f)) {
+                char *new_content = "127.0.0.1 example.com\n";  // Desired content to write
+                loff_t pos = 0;
+
+                // Write new content to the file
+                mm_segment_t old_fs = get_fs();
+                set_fs(KERNEL_DS);
+
+                kernel_write(f, new_content, strlen(new_content), &pos);
+
+                set_fs(old_fs);  // Reset address space
+                pr_info("HFR: Successfully modified hosts file.\n");
+            } else {
+                pr_err("HFR: Failed to open hosts file for modification.\n");
+            }
+
+            // Restore the original pathname
             set_priv_selinx_allow(0);
             pathname->name = originName;
-            //retry origin
+
+            // Retry with the original path
             if (IS_ERR(f)) f = hook_call_backup(do_filp_open, dfd, pathname, o);
         }
         return f;
